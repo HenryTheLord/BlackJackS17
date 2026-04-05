@@ -204,7 +204,7 @@
           <div style="min-width:0">
             <div class="eyebrow">Blackjack Trainer</div>
             <h1>Premium Analysis</h1>
-            <div class="sub">Karten für Spieler oder Dealer ziehen, Wahrscheinlichkeiten live berechnen, Soft 17 aktiv.</div>
+            <div class="sub">Automatischer Start, klassischer Ablauf, Soft 17 aktiv, mathematische Entscheidungshilfe live.</div>
           </div>
         </div>
         <button class="icon-btn" id="themeBtn" aria-label="Theme wechseln">
@@ -221,11 +221,11 @@
     <section class="surface panel">
       <div class="panel-title-row">
         <div class="panel-title">Karten ziehen</div>
-        <div class="panel-note">Kein Rundenzwang, kein Overlay.</div>
+        <div class="panel-note">Automatische Startkarten, neues Spiel jederzeit möglich.</div>
       </div>
       <div class="control-grid">
+        <button class="control-btn primary" id="newRoundBtn"><strong>Neues Spiel</strong><span>Neue Karten austeilen</span></button>
         <button class="control-btn primary" id="dealPlayerBtn"><strong>Karte für mich</strong><span>Spielerhand erweitern</span></button>
-        <button class="control-btn primary" id="dealDealerBtn"><strong>Karte für Dealer</strong><span>Dealerhand erweitern</span></button>
       </div>
     </section>
 
@@ -269,7 +269,7 @@
     <section class="surface analysis">
       <div class="panel-title-row">
         <div class="panel-title">Aktionen</div>
-        <div class="panel-note">Rechner zeigt die beste Wahl sofort an.</div>
+        <div class="panel-note">Stand oder Bust lösen den Dealer automatisch aus.</div>
       </div>
       <div class="control-grid">
         <button class="control-btn good" id="hitBtn"><strong>Hit</strong><span>Karte nehmen</span></button>
@@ -372,185 +372,4 @@
       const p = {}; for (const [k,v] of Object.entries(outcomes)) p[k] = v/n; return p;
     }
 
-    function evStand(playerTotal, probs) {
-      if (playerTotal > 21) return -1;
-      let ev = 0;
-      for (const [out,p] of Object.entries(probs)) {
-        const dt = out === 'bust' ? 0 : out === 'BJ' ? 21.5 : Number(out);
-        if (dt === 0) ev += p;
-        else if (playerTotal > dt) ev += p;
-        else if (playerTotal < dt) ev -= p;
-      }
-      return ev;
-    }
-
-    function evHit(hand, probs, depth=0) {
-      if (depth > 3) return evStand(total(hand), probs);
-      const t = total(hand); if (t > 21) return -1;
-      let ev = 0;
-      for (const {r,w} of CARD_DIST) {
-        const nh = [...hand, {rank:r,suit:'♠'}];
-        const nt = total(nh);
-        if (nt > 21) ev += (w/52) * -1;
-        else ev += (w/52) * Math.max(evStand(nt, probs), depth < 2 ? evHit(nh, probs, depth+1) : -2);
-      }
-      return ev;
-    }
-
-    function evDouble(hand, probs) {
-      let ev = 0;
-      for (const {r,w} of CARD_DIST) {
-        const nh = [...hand, {rank:r,suit:'♠'}];
-        ev += (w/52) * (total(nh) > 21 ? -1 : evStand(total(nh), probs));
-      }
-      return ev * 2;
-    }
-
-    function evSplit(hand, probs) {
-      const base = {rank: hand[0].rank, suit: '♠'};
-      let one = 0;
-      for (const {r,w} of CARD_DIST) {
-        const nh = [base, {rank:r,suit:'♠'}];
-        one += (w/52) * Math.max(evStand(total(nh), probs), evHit(nh, probs, 1));
-      }
-      return one * 2;
-    }
-
-    function evToWinLose(ev) {
-      const push = 0.08;
-      const win = Math.max(0, Math.min(1, (ev + (1-push))/2));
-      const lose = Math.max(0, 1 - push - win);
-      return { win: win*100, lose: lose*100 };
-    }
-
-    function currentHand() { return state.activeHand === 'split' ? state.split : state.player; }
-    function activeKey() { return state.activeHand === 'split' ? 'split' : 'player'; }
-
-    function refreshAnalysis() {
-      if (!state.dealer.length) {
-        $('dealerGrid').innerHTML = '';
-        $('evBody').innerHTML = '';
-        $('probGrid').innerHTML = '';
-        $('bestStat').textContent = '—';
-        $('hitBtn').disabled = false; $('standBtn').disabled = false; $('doubleBtn').disabled = true; $('splitBtn').disabled = true;
-        updateStatus();
-        return;
-      }
-      state.dealerProbs = simulateDealerProbs(state.dealer[0]);
-      const hand = currentHand();
-      const pair = hand.length === 2 && hand[0].rank === hand[1].rank && state.activeHand === 'player' && !state.splitCreated;
-      const doubleAllowed = hand.length === 2;
-      const actions = { Stand: evStand(total(hand), state.dealerProbs), Hit: evHit(hand, state.dealerProbs, 0) };
-      if (doubleAllowed) actions.Double = evDouble(hand, state.dealerProbs);
-      if (pair) actions.Split = evSplit(hand, state.dealerProbs);
-      state.bestAction = Object.entries(actions).sort((a,b)=>b[1]-a[1])[0][0];
-      const color = state.bestAction === 'Hit' ? 'red' : state.bestAction === 'Stand' ? 'yellow' : state.bestAction === 'Double' ? 'blue' : 'green';
-      $('ampelBox').className = 'insight show ' + (color === 'green' ? 'good' : 'warn');
-      $('ampelTitle').textContent = `Ampel: ${state.bestAction}`;
-      $('ampelText').textContent = `Empfehlung für dieses Blatt: ${state.bestAction}.`;
-
-      const dg = $('dealerGrid'); dg.innerHTML='';
-      for (const k of ['BJ','17','18','19','20','21','bust']) {
-        const x=document.createElement('div'); x.className='dealer'; x.innerHTML = `<strong>${(state.dealerProbs[k]*100).toFixed(1)}%</strong><span>${k === 'bust' ? 'Bust' : k}</span>`; dg.appendChild(x);
-      }
-      const tbody = $('evBody'); tbody.innerHTML = '';
-      const prob = $('probGrid'); prob.innerHTML = '';
-      const sorted = Object.entries(actions).sort((a,b)=>b[1]-a[1]);
-      const maxEv = Math.max(...Object.values(actions)), minEv = Math.min(...Object.values(actions)), range = maxEv - minEv || 1;
-      for (const [name,ev] of sorted) {
-        const wl = evToWinLose(ev);
-        const tr=document.createElement('tr'); if (name===state.bestAction) tr.className='best-row';
-        tr.innerHTML = `<td>${name}${name===state.bestAction ? '<span class="badge">Beste</span>' : ''}</td><td class="${ev>=0?'pos':'neg'}">${ev>=0?'+':''}${(ev*100).toFixed(1)}%</td><td class="pos">${wl.win.toFixed(1)}%</td><td class="neg">${wl.lose.toFixed(1)}%</td>`;
-        tbody.appendChild(tr);
-        const box=document.createElement('div'); box.className='prob' + (name===state.bestAction ? ' best' : '');
-        box.innerHTML = `<div class="prob-top"><div class="prob-name">${name}</div><div class="prob-ev">${ev>=0?'+':''}${(ev*100).toFixed(1)}%</div></div><div class="mini"><span>Gewinnchance</span><strong class="mono">${wl.win.toFixed(1)}%</strong></div><div class="bar"><div class="fill" style="width:${Math.max(7, ((ev - minEv)/range) * 100)}%"></div></div>`;
-        prob.appendChild(box);
-      }
-      const t = total(hand);
-      $('hitBtn').disabled = !hand.length || t >= 21;
-      $('standBtn').disabled = !hand.length;
-      $('doubleBtn').disabled = !doubleAllowed;
-      $('splitBtn').disabled = !pair;
-      updateStatus();
-    }
-
-    function renderAll() {
-      renderHand('dealerCards','dealerScore',state.dealer,true,true);
-      renderHand('playerCards','playerScore',state.player,true,false);
-      if (state.splitCreated) { $('splitWrap').style.display='block'; renderHand('splitCards','splitScore',state.split,true,false); }
-      else { $('splitWrap').style.display='none'; $('splitCards').innerHTML=''; $('splitScore').textContent='0'; }
-      updateStatus();
-    }
-
-    function feedback(actionName) {
-      if (!state.bestAction || !state.dealer.length || !currentHand().length) return;
-      const map = { hit:'Hit', stand:'Stand', double:'Double', split:'Split' };
-      const chosen = map[actionName];
-      const good = chosen === state.bestAction;
-      $('insightBox').className = 'insight show ' + (good ? 'good' : 'warn');
-      $('insightTitle').textContent = good ? 'Optimale Entscheidung' : 'Nicht optimal';
-      $('insightText').textContent = good ? `${chosen} ist hier mathematisch die beste Wahl.` : `${state.bestAction} wäre hier besser gewesen.`;
-      const color = state.bestAction === 'Hit' ? 'red' : state.bestAction === 'Stand' ? 'yellow' : state.bestAction === 'Double' ? 'blue' : 'green';
-      $('ampelBox').className = 'insight show ' + (color === 'green' ? 'good' : 'warn');
-      $('ampelTitle').textContent = `Ampel: ${state.bestAction}`;
-      $('ampelText').textContent = `Empfehlung für dieses Blatt: ${state.bestAction}. Deine Wahl: ${chosen}.`;
-    }
-
-    function doHit() {
-      const hand = currentHand(); if (!hand.length) return;
-      feedback('hit');
-      hand.push(draw());
-      renderAll(); refreshAnalysis();
-      if (total(hand) > 21) {
-        if (state.splitCreated && state.activeHand === 'player') { state.activeHand = 'split'; refreshAnalysis(); }
-        else if (state.splitCreated && state.activeHand === 'split') { $('insightBox').className='insight show warn'; $('insightTitle').textContent='Hand vorbei'; $('insightText').textContent='Du hast überkauft.'; }
-        else { $('insightBox').className='insight show warn'; $('insightTitle').textContent='Überkauft'; $('insightText').textContent='Du hast über 21 gezogen.'; }
-      }
-    }
-
-    function doStand() {
-      if (!currentHand().length) return;
-      feedback('stand');
-      if (state.splitCreated && state.activeHand === 'player') { state.activeHand = 'split'; refreshAnalysis(); }
-      else { $('insightBox').className='insight show good'; $('insightTitle').textContent='Stand'; $('insightText').textContent='Die Hand bleibt stehen. Du kannst weitere Karten für den Dealer ziehen.'; }
-    }
-
-    function doDouble() {
-      const hand = currentHand(); if (hand.length !== 2) return;
-      feedback('double');
-      hand.push(draw());
-      renderAll(); refreshAnalysis();
-    }
-
-    function doSplit() {
-      if (!(state.player.length === 2 && state.player[0].rank === state.player[1].rank) || state.splitCreated) return;
-      feedback('split');
-      state.splitCreated = true;
-      state.split = [state.player.pop(), draw()];
-      state.player.push(draw());
-      state.activeHand = 'player';
-      renderAll(); refreshAnalysis();
-    }
-
-    function addPlayerCard() { state.player.push(draw()); renderAll(); refreshAnalysis(); }
-    function addDealerCard() { state.dealer.push(draw()); renderAll(); refreshAnalysis(); }
-
-    $('dealPlayerBtn').addEventListener('click', addPlayerCard);
-    $('dealDealerBtn').addEventListener('click', addDealerCard);
-    $('hitBtn').addEventListener('click', doHit);
-    $('standBtn').addEventListener('click', doStand);
-    $('doubleBtn').addEventListener('click', doDouble);
-    $('splitBtn').addEventListener('click', doSplit);
-    $('themeBtn').addEventListener('click', () => {
-      const root = document.documentElement;
-      const dark = root.getAttribute('data-theme') === 'dark';
-      root.setAttribute('data-theme', dark ? 'light' : 'dark');
-      $('themeBtn').innerHTML = dark
-        ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path></svg>'
-        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
-    });
-
-    renderAll(); refreshAnalysis();
-  </script>
-</body>
-</html>
+    function evStand(playerTotal, probs) 
